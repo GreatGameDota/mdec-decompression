@@ -15,7 +15,7 @@ Results will be saved in `output.png`
 
 Example output image (extracted from Heart of Darkness):
 
-<img src="https://github.com/GreatGameDota/mdec-decompression/blob/master/.examples/hod_loading.png?raw=true">
+<img src="https://github.com/GreatGameDota/mdec-decompression/blob/master/examples/hod_loading.png?raw=true">
 
 ### Resources
 
