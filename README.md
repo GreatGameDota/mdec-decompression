@@ -11,6 +11,12 @@ Currently only supports RGB conversion. Mono will be added soon!
 
 Results will be saved in `output.png`
 
+### Examples
+
+Example output image (extracted from Heart of Darkness):
+
+<img src="https://github.com/GreatGameDota/mdec-decompression/blob/master/.examples/hod_loading.png?raw=true">
+
 ### Resources
 
 <https://psx-spx.consoledev.net/macroblockdecodermdec/#mdec-decompression>
