@@ -101,7 +101,7 @@ int16_t quantize_ac(uint16_t val, uint8_t quant, uint8_t qScale)
 }
 
 // Decode RLE data to block
-void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type)
+void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type, uint16_t *end)
 {
     // Select quantization table based on block type
     const uint8_t *qt = (block_type == MDEC_BLOCK_Y) ? y_quant_table : c_quant_table;
@@ -111,11 +111,17 @@ void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type)
     for (int i = 0; i < 64; i++)
         blk[i] = 0;
 
+    if (*data >= end)
+        return;
+
     // Look for start of block (skip FE00 markers)
     uint16_t n = *(*data)++;
     int k = 0;
-    while (n == 0xfe00)
+    while (n == 0xfe00 && *data < end)
         n = *(*data)++;
+
+    if (*data >= end)
+        return;
 
     // Extract q_scale and DC value
     uint8_t q_scale = (n >> 10) & 0x3f;
@@ -157,13 +163,14 @@ void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type)
 }
 
 // Process a single 8x8 block
-void process_mdec_block(uint16_t **rle_data, int16_t output[8][8], MdecBlockType block_type)
+void process_mdec_block(uint16_t **rle_data, int16_t output[8][8], MdecBlockType block_type,
+                        uint16_t *end)
 {
     int16_t rle_decoded[64] = {0};
     int16_t dct_block[8][8] = {0};
 
     // Decode RLE data
-    rle_decode(rle_data, rle_decoded, block_type);
+    rle_decode(rle_data, rle_decoded, block_type, end);
 
     // Convert 1D array to 8x8 block
     for (int i = 0; i < 8; i++)
@@ -212,7 +219,7 @@ void yuv_to_rgb(int16_t yBlk[8][8], int16_t cbBlk[8][8], int16_t crBlk[8][8],
 }
 
 // Process a 16x16 macroblock
-void process_macroblock(uint16_t **rle_data, uint8_t *output_image,
+void process_macroblock(uint16_t **rle_data, uint8_t *output_image, uint16_t *end,
                         int image_width, int mb_x, int mb_y)
 {
     int16_t y_blocks[4][8][8];
@@ -220,14 +227,14 @@ void process_macroblock(uint16_t **rle_data, uint8_t *output_image,
     int16_t cr_block[8][8];
 
     // Process Cr block (chrominance red)
-    process_mdec_block(rle_data, cr_block, MDEC_BLOCK_CR);
+    process_mdec_block(rle_data, cr_block, MDEC_BLOCK_CR, end);
 
     // Process Cb block (chrominance blue)
-    process_mdec_block(rle_data, cb_block, MDEC_BLOCK_CB);
+    process_mdec_block(rle_data, cb_block, MDEC_BLOCK_CB, end);
 
     // Process Y blocks (luminance)
     for (int i = 0; i < 4; i++)
-        process_mdec_block(rle_data, y_blocks[i], MDEC_BLOCK_Y);
+        process_mdec_block(rle_data, y_blocks[i], MDEC_BLOCK_Y, end);
 
     // Convert YUV to RGB for each 8x8 block within the macroblock
     yuv_to_rgb(y_blocks[0], cb_block, cr_block, mb_x, mb_y, 0, 0, output_image, image_width);
@@ -237,7 +244,7 @@ void process_macroblock(uint16_t **rle_data, uint8_t *output_image,
 }
 
 // Main MDEC decoder function
-void decode_mdec_image(uint16_t **data, int data_size, int width, int height, const char *output_file)
+void decode_mdec_image(uint16_t **data, uint16_t *end, int width, int height, const char *output_file)
 {
     // Allocate memory for output image (RGB format)
     uint8_t *output_image = new uint8_t[width * height * 3];
@@ -245,7 +252,7 @@ void decode_mdec_image(uint16_t **data, int data_size, int width, int height, co
     // Process macroblocks in column-major order
     for (int x = 0; x < width; x += 16)
         for (int y = 0; y < height; y += 16)
-            process_macroblock(data, output_image, width, x, y);
+            process_macroblock(data, output_image, end, width, x, y);
 
     // Save decoded image
     if (stbi_write_png(output_file, width, height, 3, output_image, width * 3))
@@ -285,7 +292,7 @@ int main(int argc, char *argv[])
 
     // Decode the image
     uint16_t *buf_ptr = buffer.data();
-    decode_mdec_image(&buf_ptr, (int)buffer.size(), width, height, output_file);
+    decode_mdec_image(&buf_ptr, buf_ptr + buffer.size(), width, height, output_file);
 
     return 0;
 }
