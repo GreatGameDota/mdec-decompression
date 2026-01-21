@@ -57,6 +57,8 @@ const int16_t scale_table[64] = {
     -30274, 30273, -12540, -12540, 30273, -30274, 12539, 6392, -18205, 27245, -32139, 32138,
     -27246, 18204, -6393};
 
+bool earlyTerminate = false;
+
 // Perform IDCT on 8x8 block
 void idct_core(int16_t src[8][8], int16_t dst[8][8])
 {
@@ -112,7 +114,10 @@ void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type, uint16_
         blk[i] = 0;
 
     if (*data >= end)
+    {
+        earlyTerminate = true;
         return;
+    }
 
     // Look for start of block (skip FE00 markers)
     uint16_t n = *(*data)++;
@@ -121,7 +126,10 @@ void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type, uint16_
         n = *(*data)++;
 
     if (*data >= end)
+    {
+        earlyTerminate = true;
         return;
+    }
 
     // Extract q_scale and DC value
     uint8_t q_scale = (n >> 10) & 0x3f;
@@ -250,10 +258,38 @@ void decode_mdec_image(uint16_t **data, uint16_t *end, int width, int height, co
     uint8_t *output_image = new uint8_t[width * height * 3];
 
     // Process macroblocks in column-major order
-    for (int x = 0; x < width; x += 16)
-        for (int y = 0; y < height; y += 16)
-            process_macroblock(data, output_image, end, width, x, y);
+    std::vector<uint8_t *> patches;
+    while (*data < end) // Decode image
+    {
+        uint8_t *patch = new uint8_t[16 * 16 * 3];
+        earlyTerminate = false;
+        process_macroblock(data, patch, end, 16, 0, 0);
+        if (!earlyTerminate)
+            patches.push_back(patch);
+    }
+    printf("Decoded %zu patches\n", patches.size());
+    // Reconstruct full image from patches
+    int patches_per_column = (height + 15) / 16; // Ensure proper handling of non-multiples of 16
+    for (int i = 0; i < (int)patches.size(); i++)
+    {
+        int patch_x = (i / patches_per_column) * 16;
+        int patch_y = (i % patches_per_column) * 16;
 
+        for (int y = 0; y < 16; y++)
+        {
+            if (patch_y + y >= height) break;
+            for (int x = 0; x < 16; x++)
+            {
+                if (patch_x + x >= width) break;
+                int dst_offset = ((patch_y + y) * width + (patch_x + x)) * 3;
+                int src_offset = (y * 16 + x) * 3;
+                output_image[dst_offset] = patches[i][src_offset];
+                output_image[dst_offset + 1] = patches[i][src_offset + 1];
+                output_image[dst_offset + 2] = patches[i][src_offset + 2];
+            }
+        }
+        delete[] patches[i];
+    }
     // Save decoded image
     if (stbi_write_png(output_file, width, height, 3, output_image, width * 3))
         std::cout << "Successfully saved PNG image!" << std::endl;
