@@ -28,6 +28,16 @@ const uint8_t zagzig[64] = {
     58, 59, 52, 45, 38, 31, 39, 46,
     53, 60, 61, 54, 47, 55, 62, 63};
 
+const uint8_t zigzag[64] = {
+    0, 1, 5, 6, 14, 15, 27, 28,
+    2, 4, 7, 13, 16, 26, 29, 42,
+    3, 8, 12, 17, 25, 30, 41, 43,
+    9, 11, 18, 24, 31, 40, 44, 53,
+    10, 19, 23, 32, 39, 45, 52, 54,
+    20, 22, 33, 38, 46, 51, 55, 60,
+    21, 34, 37, 47, 50, 56, 59, 61,
+    35, 36, 48, 49, 57, 58, 62, 63};
+
 // Quantization tables for Y and Cr/Cb
 const uint8_t y_quant_table[64] = {
     2, 16, 19, 22, 26, 27, 29, 34,
@@ -57,24 +67,73 @@ const int16_t scale_table[64] = {
     -30274, 30273, -12540, -12540, 30273, -30274, 12539, 6392, -18205, 27245, -32139, 32138,
     -27246, 18204, -6393};
 
+const double scalefactor[8] = {1.000000000, 1.387039845, 1.306562965, 1.175875602, 1.000000000, 0.785694958, 0.541196100, 0.275899379};
+const double scalezag[64] = {
+    0.125, 0.17338, 0.17338, 0.16332, 0.240485, 0.16332, 0.146984, 0.226532,
+    0.226532, 0.146984, 0.125, 0.203873, 0.213388, 0.203873, 0.125, 0.0982119,
+    0.17338, 0.192044, 0.192044, 0.17338, 0.0982119, 0.0676495, 0.136224, 0.16332,
+    0.172835, 0.16332, 0.136224, 0.0676495, 0.0344874, 0.0938326, 0.12832, 0.146984,
+    0.146984, 0.12832, 0.0938326, 0.0344874, 0.0478354, 0.0883883, 0.115485, 0.125,
+    0.115485, 0.0883883, 0.0478354, 0.04506, 0.0795474, 0.0982119, 0.0982119, 0.0795474,
+    0.04506, 0.0405529, 0.0676495, 0.0771646, 0.0676495, 0.0405529, 0.0344874, 0.0531519,
+    0.0531519, 0.0344874, 0.0270966, 0.0366117, 0.0270966, 0.0186645, 0.0186645, 0.00951506};
+
 bool earlyTerminate = false;
 
 // Perform IDCT on 8x8 block
 void idct_core(int16_t src[8][8], int16_t dst[8][8])
 {
-    for (int i = 0; i < 2; i++)
+    for (int pass = 0; pass < 2; pass++)
     {
-        for (int x = 0; x < 8; x++)
+        for (int i = 0; i < 8; i++)
         {
-            for (int y = 0; y < 8; y++)
+            // Quick fill if AC coefficients are zero
+            if (src[1][i] == 0 && src[2][i] == 0 && src[3][i] == 0 &&
+                src[4][i] == 0 && src[5][i] == 0 && src[6][i] == 0 && src[7][i] == 0)
             {
-                int32_t sum = 0;
-                for (int z = 0; z < 8; z++)
-                    sum += (int32_t)src[z][y] * (int32_t)(scale_table[x + z * 8] >> 3);
-                dst[y][x] = (sum + 0x0fff) >> 13;
+                for (int j = 0; j < 8; j++)
+                    dst[i][j] = src[0][i];
+            }
+            else
+            {
+                double z10, z11, z12, z13, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
+
+                z10 = (double)src[0][i] + src[4][i];
+                z11 = (double)src[0][i] - src[4][i];
+                z13 = (double)src[2][i] + src[6][i];
+                z12 = (double)src[2][i] - src[6][i];
+
+                z12 = (1.414213562 * z12) - z13;
+
+                tmp0 = z10 + z13;
+                tmp3 = z10 - z13;
+                tmp1 = z11 + z12;
+                tmp2 = z11 - z12;
+
+                z13 = (double)src[3][i] + src[5][i];
+                z10 = (double)src[3][i] - src[5][i];
+                z11 = (double)src[1][i] + src[7][i];
+                z12 = (double)src[1][i] - src[7][i];
+
+                double z5 = 1.847759065 * (z12 - z10);
+
+                tmp7 = z11 + z13;
+                tmp6 = (2.613125930 * z10) + z5 - tmp7;
+                tmp5 = (1.414213562 * (z11 - z13)) - tmp6;
+                tmp4 = (1.082392200 * z12) - z5 + tmp5;
+
+                dst[i][0] = (int16_t)(tmp0 + tmp7);
+                dst[i][7] = (int16_t)(tmp0 - tmp7);
+                dst[i][1] = (int16_t)(tmp1 + tmp6);
+                dst[i][6] = (int16_t)(tmp1 - tmp6);
+                dst[i][2] = (int16_t)(tmp2 + tmp5);
+                dst[i][5] = (int16_t)(tmp2 - tmp5);
+                dst[i][4] = (int16_t)(tmp3 + tmp4);
+                dst[i][3] = (int16_t)(tmp3 - tmp4);
             }
         }
-        if (i == 0)
+
+        if (pass == 0)
             for (int j = 0; j < 8; j++)
                 std::swap(src[j], dst[j]);
     }
@@ -136,7 +195,7 @@ void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type, uint16_
     uint16_t val = n & 0x3ff;
 
     // Store DC value
-    blk[zagzig[k]] = quantize_dc(val, qt[k]);
+    blk[zagzig[k]] = (int16_t)((double)quantize_dc(val, qt[k]) * scalezag[k]);
 
     // Process AC coefficients
     k++;
@@ -155,7 +214,7 @@ void rle_decode(uint16_t **data, int16_t *blk, MdecBlockType block_type, uint16_
         val = n & 0x3ff;
 
         // Apply quantization and scaling
-        blk[zagzig[k]] = quantize_ac(val, qt[k], q_scale);
+        blk[zagzig[k]] = (int16_t)((double)quantize_ac(val, qt[k], q_scale) * scalezag[k]);
 
         k++;
         if (k >= 64)
@@ -277,10 +336,12 @@ void decode_mdec_image(uint16_t **data, uint16_t *end, int width, int height, co
 
         for (int y = 0; y < 16; y++)
         {
-            if (patch_y + y >= height) break;
+            if (patch_y + y >= height)
+                break;
             for (int x = 0; x < 16; x++)
             {
-                if (patch_x + x >= width) break;
+                if (patch_x + x >= width)
+                    break;
                 int dst_offset = ((patch_y + y) * width + (patch_x + x)) * 3;
                 int src_offset = (y * 16 + x) * 3;
                 output_image[dst_offset] = patches[i][src_offset];
