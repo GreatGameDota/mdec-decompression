@@ -325,6 +325,8 @@ void decode_mdec_image(uint16_t **data, uint16_t *end, int width, int height, co
         process_macroblock(data, patch, end, 16, 0, 0);
         if (!earlyTerminate)
             patches.push_back(patch);
+        else
+            delete[] patch;
     }
     printf("Decoded %zu patches\n", patches.size());
     // Reconstruct full image from patches
